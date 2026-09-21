@@ -1108,108 +1108,101 @@ function requestWorkerTokens(){
   state.tokenizerWorker.postMessage({type:'tokenize',id,lines});
 }
 
-// ===== 最终修正版：安全的 Kuromoji token 渲染 =====
-// 不再让单个 token 的渲染异常把整行悄悄降级到内置规则模式。
-function safeTokenHtml(t,line,idx){
+// ===== 稳定版 Kuromoji 渲染：每个含汉字的 token 都直接使用 reading =====
+// 核心原则：不要让复杂的词法合并/对齐失败把整行降级成“只有特殊词注音”。
+function stableTokenRuby(t,line,idx){
   try{
     const s=String(t && t.surface_form || '');
     if(!s) return '';
     if(!/[一-龯々]/.test(s)) return escape(s);
 
     const hasOverride=Object.prototype.hasOwnProperty.call(state.overrides,s);
-    const override=hasOverride ? state.overrides[s] : null;
-    const reading=override!==null ? override : (special[s] || (t && t.reading ? hira(t.reading) : ''));
+    if(hasOverride && state.overrides[s]==='') return escape(s);
 
-    if(hasOverride && override==='') return escape(s);
-    if(!reading) return escape(s);
+    let r = hasOverride ? state.overrides[s] : (special[s] || (t && t.reading ? hira(t.reading) : ''));
+    r=hira(r||'');
+    if(!r) return escape(s);
 
-    // 送假名词：例如 始め / 食べる / 美しい。
-    // 优先使用已有的稳健 mixedRubyHtml；失败时退回整词 ruby，绝不抛错。
-    try{
-      return mixedRubyHtml(s,reading,line,idx);
-    }catch(err){
-      console.warn('ruby token render fallback:', s, err);
-      return makeRuby(s,reading,line,idx);
+    // 没有送假名：整个汉字词直接加 ruby。
+    if(!/[ぁ-ゖァ-ヶー]/.test(s)) return makeRuby(s,r,line,idx);
+
+    // 汉字+送假名：按照表面假名在 reading 中出现的位置切分。
+    // 例如：受けた/うけた → 受(う)けた；美しい/うつくしい → 美(うつく)しい。
+    let html='';
+    let rp=0;
+    let i=0;
+    while(i<s.length){
+      if(/[一-龯々]/.test(s[i])){
+        let j=i+1;
+        while(j<s.length && /[一-龯々]/.test(s[j])) j++;
+        const kanji=s.slice(i,j);
+
+        // 找后面的送假名边界
+        let k=j;
+        while(k<s.length && !/[一-龯々]/.test(s[k])) k++;
+        const kana = s.slice(j,k);
+        if(kana){
+          const boundary=hira(kana);
+          const pos=r.indexOf(boundary,rp);
+          if(pos>=rp){
+            const rr=r.slice(rp,pos);
+            html += rr ? makeRuby(kanji,rr,line,idx+'-'+i) : escape(kanji);
+            rp=pos;
+            i=j;
+            continue;
+          }
+          // 对齐失败时，不抛异常；下面直接整词 ruby。
+          return makeRuby(s,r,line,idx);
+        }
+
+        const rr=r.slice(rp);
+        html += rr ? makeRuby(kanji,rr,line,idx+'-'+i) : escape(kanji);
+        rp=r.length;
+        i=j;
+        continue;
+      }
+
+      let j=i+1;
+      while(j<s.length && !/[一-龯々]/.test(s[j])) j++;
+      const kana=s.slice(i,j);
+      const h=hira(kana);
+      if(r.slice(rp,rp+h.length)===h){
+        html += escape(kana);
+        rp += h.length;
+        i=j;
+      }else{
+        return makeRuby(s,r,line,idx);
+      }
     }
+    return html || makeRuby(s,r,line,idx);
   }catch(err){
-    console.warn('ruby token skipped:', err);
-    return escape(String(t && t.surface_form || ''));
+    console.warn('stable ruby fallback:',err);
+    const s=String(t && t.surface_form || '');
+    const r=hira(t && t.reading || '');
+    return r ? makeRuby(s,r,line,idx) : escape(s);
   }
 }
 
-function safeAnnotateTokens(tokens,line){
+function stableAnnotateTokens(tokens,line){
   const list=Array.isArray(tokens)?tokens:[];
-  if(!list.length)return '';
   let out='';
   for(let i=0;i<list.length;i++){
-    const t=list[i]||{};
-    // 只在特殊词/手动修改需要时合并；普通 Kuromoji token 直接使用自己的 reading。
-    let merged=null;
-    const keys=[...new Set([...Object.keys(special),...Object.keys(state.overrides)])]
-      .filter(k=>/[一-龯々]/.test(k))
-      .sort((a,b)=>b.length-a.length);
-    for(const key of keys){
-      if((t.surface_form||'')===key){
-        merged=t;
-        break;
-      }
-      let surface='',j=i;
-      while(j<list.length && surface.length<key.length){
-        surface += String(list[j] && list[j].surface_form || '');
-        if(surface.length>key.length)break;
-        j++;
-      }
-      if(surface!==key || j===i) continue;
-
-      // 确认 token 在原文中真正连续；word_position 缺失时也允许按 token 顺序合并。
-      let contiguous=true;
-      for(let k=i+1;k<j;k++){
-        const prev=list[k-1]||{}, cur=list[k]||{};
-        if(typeof prev.word_position==='number' && typeof cur.word_position==='number'){
-          const expected=prev.word_position+String(prev.surface_form||'').length;
-          if(cur.word_position!==expected){contiguous=false;break;}
-        }
-      }
-      if(!contiguous) continue;
-
-      merged={...(list[i]||{}),surface_form:key,reading:
-        Object.prototype.hasOwnProperty.call(state.overrides,key)
-          ? state.overrides[key]
-          : (special[key] || list.slice(i,j).map(x=>x.reading?hira(x.reading):'').join(''))
-      };
-      merged._sourceTokens=list.slice(i,j);
-      break;
-    }
-    if(merged){
-      out+=safeTokenHtml(merged,line,i);
-      const keyLen=String(merged.surface_form||'').length;
-      if(keyLen>String(t.surface_form||'').length){
-        let consumed=0;
-        while(i<list.length && consumed<keyLen){
-          consumed+=String(list[i] && list[i].surface_form || '').length;
-          i++;
-        }
-        i--;
-      }else{
-        // 单 token 特殊词
-      }
-    }else{
-      out+=safeTokenHtml(t,line,i);
-    }
+    out += stableTokenRuby(list[i]||{},line,i);
   }
   return out;
 }
 
 function annotateLine(text,line){
   if(state.tokenLines && state.tokenText===$('editor').value && Array.isArray(state.tokenLines[line])){
-    return safeAnnotateTokens(state.tokenLines[line],line);
+    return stableAnnotateTokens(state.tokenLines[line],line);
   }
   if(state.tokenizer){
-    try{return safeAnnotateTokens(state.tokenizer.tokenize(text),line)}catch(e){
+    try{return stableAnnotateTokens(state.tokenizer.tokenize(text),line)}catch(e){
       console.warn('tokenize render failed:',e);
     }
   }
-  // 词典仍在加载时，只显示内置特殊词；词典就绪后不会走这里。
+
+  // 词典尚未返回时，仅使用内置特殊词，避免页面报错。
   let out='',i=0;
   const keys=Object.keys(special).sort((a,b)=>b.length-a.length);
   while(i<text.length){
