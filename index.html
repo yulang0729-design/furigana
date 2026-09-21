@@ -87,7 +87,7 @@ textarea.editor{width:100%;height:380px;padding:14px;resize:none;line-height:1.8
 .preview{width:100%;height:380px;padding:16px;overflow:auto;display:flex;flex-direction:column;gap:12px;border:2px solid var(--border);border-radius:14px;background:#fff}
 .line{border-bottom:1.5px dashed #eedbc5;padding-bottom:10px;color:#2f241f;font-weight:700}
 .line:last-child{border-bottom:0}
-ruby{ruby-position:overruby-overhang:none;}
+ruby{ruby-position:over;ruby-overhang:none;}
 rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none;pointer-events:none}
 .token{cursor:pointer;border-radius:6px;padding:0 2px;transition:.1s}
 .token:hover{background:#ffe3b8}
@@ -474,7 +474,7 @@ rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none;point
 // yesyes标假名 v11 — GitHub Pages词典修复版
 const state={
   rubyType:'hiragana', rubyColor:'#f57676', fontSize:16, rubySize:10, lineSpace:1.8,
-  tokenizer:null, tokenizerWorker:null, tokenizerReady:false, tokenLines:null, tokenText:'', tokenRequest:0,
+  tokenizer:null, tokenizerWorker:null, tokenizerReady:false, tokenizerStartedAt:0, tokenLines:null, tokenText:'', tokenRequest:0,
   overrides:{}, editing:null, editMode:false, imageBgMode:'color', imageBgColor:'#e0e5ec',
   imageBgUrl:'', imageWidth:1440, imageMode:'long', format:'docx', queue:[]
 };
@@ -487,7 +487,7 @@ function roma(s){
  let out='',i=0; s=hira(s);
  while(i<s.length){let two=s.slice(i,i+2);if(map[two]!==undefined){out+=map[two];i+=2;continue}out+=map[s[i]]??s[i];i++}return out;
 }
-const special={'今日':'きょう','明日':'あした','昨日':'きのう','大人':'おとな','友達':'ともだち','日本語':'にほんご','日本人':'にほんじん','先生':'せんせい','学生':'がくせい','一日':'いちにち','大丈夫':'だいじょうぶ','大好き':'だいすき','久しぶり':'ひさしぶり','未来':'みらい','希望':'きぼう','声優':'せいゆう','台本':'だいほん','読み方':'よみかた','書き方':'かきかた','考え方':'かんがえかた','話し方':'はなしかた','使い方':'つかいかた','教え方':'おしえかた','仕方':'しかた','思った':'おもった','思って':'おもって','言った':'いった','言って':'いって','行った':'いった','行って':'いって','見つけた':'みつけた','見つけて':'みつけて','風':'かぜ','何':'なに','私':'わたし','僕':'ぼく','俺':'おれ','君':'きみ','初め':'はじ','始め':'はじ','練習':'れんしゅう','勉強':'べんきょう','学校':'がっこう','会社':'かいしゃ','仕事':'しごと','時間':'じかん','日本':'にほん','名前':'なまえ','電話':'でんわ','文章':'ぶんしょう','意味':'いみ','言葉':'ことば','先生':'せんせい','学生':'がくせい'};
+const special={'今日':'きょう','明日':'あした','昨日':'きのう','大人':'おとな','友達':'ともだち','日本語':'にほんご','日本人':'にほんじん','先生':'せんせい','山田':'やまだ','佐藤':'さとう','鈴木':'すずき','高橋':'たかはし','田中':'たなか','伊藤':'いとう','渡辺':'わたなべ','学生':'がくせい','一日':'いちにち','大丈夫':'だいじょうぶ','大好き':'だいすき','久しぶり':'ひさしぶり','未来':'みらい','希望':'きぼう','声優':'せいゆう','台本':'だいほん','読み方':'よみかた','書き方':'かきかた','考え方':'かんがえかた','話し方':'はなしかた','使い方':'つかいかた','教え方':'おしえかた','仕方':'しかた','思った':'おもった','思って':'おもって','言った':'いった','言って':'いって','行った':'いった','行って':'いって','見つけた':'みつけた','見つけて':'みつけて','風':'かぜ','何':'なに','私':'わたし','僕':'ぼく','俺':'おれ','君':'きみ','初め':'はじめ','始め':'はじめ','練習':'れんしゅう','学習':'がくしゅう','漢字':'かんじ','勉強':'べんきょう','学校':'がっこう','会社':'かいしゃ','仕事':'しごと','時間':'じかん','日本':'にほん','名前':'なまえ','電話':'でんわ','文章':'ぶんしょう','意味':'いみ','言葉':'ことば','先生':'せんせい','学生':'がくせい'};
 function isKanjiChar(ch){return /[\u3400-\u9fff]/.test(ch)}
 function readingFor(t){let s=t.surface_form||'';if(Object.prototype.hasOwnProperty.call(state.overrides,s))return state.overrides[s];if(special[s])return special[s];return t.reading?hira(t.reading):''}
 function shownReading(r){if(state.rubyType==='romaji')return roma(r);if(state.rubyType==='katakana')return kata(r);return r}
@@ -499,27 +499,158 @@ function mixedRubyHtml(s,r,line,idx){
  s=s||''; r=hira(r||'');
  if(!r || !/[一-龯々]/.test(s)) return escape(s);
 
- // 含有送り仮名的词（如「始め」「食べる」「読み方」等）不要把读音
- // 硬拆成「<ruby>始<rt>はじ</rt></ruby>め」。
- // 这种写法会让较长的 rt 按浏览器 ruby 规则向相邻文字伸出，
- // 手机端尤其容易出现“じ跑到め上面”的视觉错位。
- // 对这类词，直接让整词作为一个 ruby 基准，读音居中对应整个词。
- const hasKana=/[ぁ-ゖァ-ヶ]/.test(s);
- if(hasKana){
-   const fullOverride=Object.prototype.hasOwnProperty.call(state.overrides,s) ? state.overrides[s] : null;
-   if(fullOverride===''){
-     return `<span class="token token-removed" data-line="${line}" data-idx="${idx}" data-surface="${escape(s)}" data-reading="${escape(shownReading(r))}">${escape(s)}</span>`;
-   }
-   return makeRuby(s,fullOverride || r,line,idx);
- }
-
- // 纯汉字词：按词整体标音，避免把一个词的读音错误拆到相邻汉字上。
  const fullOverride=Object.prototype.hasOwnProperty.call(state.overrides,s) ? state.overrides[s] : null;
  if(fullOverride===''){
    return `<span class="token token-removed" data-line="${line}" data-idx="${idx}" data-surface="${escape(s)}" data-reading="${escape(shownReading(r))}">${escape(s)}</span>`;
  }
+ if(fullOverride) r=hira(fullOverride);
+
+ // 正确处理“汉字 + 送假名 + 汉字”的结构：
+ // 読み方 → 読(よ)み 方(かた)
+ // 始め → 始(はじ)め
+ // 食べる → 食(た)べる
+ // 不再把整词的 reading 错放到包含假名的单个汉字上。
+ const parts=[];
+ let i=0;
+ let rp=0;
+ let failed=false;
+ const kanaRe=/[ぁ-ゖァ-ヶー]+/;
+
+ function pushRuby(surface,reading,part){
+   if(!surface)return;
+   if(reading){
+     parts.push(makeRuby(surface,reading,line,idx+'-'+part));
+   }else{
+     parts.push(escape(surface));
+   }
+ }
+
+ while(i<s.length){
+   const isK=/[一-龯々]/.test(s[i]);
+   if(!isK){
+     // 连续假名原样保留，不给假名自身再套 ruby。
+     let j=i+1;
+     while(j<s.length && !/[一-龯々]/.test(s[j]))j++;
+     const kana=s.slice(i,j);
+     const pos=r.indexOf(hira(kana),rp);
+     if(pos<rp){
+       failed=true;
+       break;
+     }
+     if(pos>=rp){
+       if(pos>rp){
+         // 前面的 reading 属于紧邻的前一个汉字块。
+         if(parts.length){
+           const last=parts.pop();
+           // 只能安全地把 reading 补到刚刚生成的 ruby；
+           // 如果 last 已经是 HTML，则无法可靠修改，因此回退到整词 ruby。
+           failed=true;
+           break;
+         }
+       }
+       parts.push(escape(kana));
+       rp=pos+hira(kana).length;
+       i=j;
+       continue;
+     }
+     failed=true;
+     break;
+   }
+
+   // 连续汉字块
+   let j=i+1;
+   while(j<s.length && /[一-龯々]/.test(s[j]))j++;
+   const kanji=s.slice(i,j);
+
+   // 找下一个送假名边界；若没有，则剩余 reading 全属于这个汉字块。
+   let k=j;
+   while(k<s.length && /[一-龯々]/.test(s[k]))k++;
+   if(k<s.length){
+     let q=k;
+     while(q<s.length && !/[一-龯々]/.test(s[q]))q++;
+     const boundary=hira(s.slice(k,q));
+     const pos=r.indexOf(boundary,rp);
+     if(pos<rp){
+       failed=true;
+       break;
+     }
+     if(pos>=rp){
+       pushRuby(kanji,r.slice(rp,pos),parts.length);
+       rp=pos;
+       i=j;
+       continue;
+     }
+   }
+
+   // 最后的汉字块：把剩余 reading 全部给它。
+   pushRuby(kanji,r.slice(rp),parts.length);
+   rp=r.length;
+   i=j;
+ }
+
+ if(!failed && rp===r.length){
+   return parts.join('');
+ }
+
+ // 对极少数无法可靠对齐的 token，宁可整词 ruby，也不要产生错误的局部对应。
  return makeRuby(s,fullOverride || r,line,idx);
 }
+
+function mergeRubyTokens(tokens){
+ const list=Array.isArray(tokens)?tokens:[];
+ if(!list.length)return list;
+ const keys=[...new Set([...Object.keys(special),...Object.keys(state.overrides)])]
+   .filter(k=>/[一-龯々]/.test(k))
+   .sort((a,b)=>b.length-a.length);
+ const out=[];
+ let i=0;
+ while(i<list.length){
+   const t=list[i]||{};
+   let merged=null;
+   // 只合并“原始 token 在文本中紧密相邻”的词，避免跨空格/标点误合并。
+   for(const key of keys){
+     let surface='', j=i, ok=true, startPos=t.word_position;
+     while(surface.length<key.length && j<list.length){
+       const part=list[j]||{};
+       const pos=part.word_position;
+       if(j===i){
+         if(typeof startPos!=='number') startPos=pos;
+       }else if(typeof pos==='number' && typeof list[j-1].word_position==='number'){
+         const prev=list[j-1].surface_form||'';
+         if(pos !== list[j-1].word_position + prev.length){ok=false;break;}
+       }
+       surface += part.surface_form||'';
+       if(surface.length>key.length)break;
+       j++;
+     }
+     if(ok && surface===key && j>i){
+       const first=list[i], last=list[j-1];
+       merged={
+         ...first,
+         surface_form:key,
+         reading: Object.prototype.hasOwnProperty.call(state.overrides,key)
+           ? state.overrides[key]
+           : (special[key] || (first.reading && j===i+1 ? first.reading : '')),
+         _merged:true,
+         _sourceTokens:list.slice(i,j)
+       };
+       // 如果 special/override 没有读音，优先把各 token reading 拼起来作为兜底。
+       if(!merged.reading){
+         const pieces=list.slice(i,j).map(x=>x.reading?hira(x.reading):'');
+         merged.reading=pieces.join('');
+       }
+       out.push(merged);
+       i=j;
+       break;
+     }
+   }
+   if(merged)continue;
+   out.push(t);
+   i++;
+ }
+ return out;
+}
+
 function tokenHtml(t,line,idx){
  const s=t.surface_form||'';
  const hasOverride=Object.prototype.hasOwnProperty.call(state.overrides,s);
@@ -533,19 +664,24 @@ function tokenHtml(t,line,idx){
  if(!r)return escape(s);
  return mixedRubyHtml(s,r,line,idx);
 }
+function annotateTokens(tokens,line){
+ const merged=mergeRubyTokens(tokens);
+ return merged.map((t,i)=>tokenHtml(t,line,i)).join('');
+}
 function annotateLine(text,line){
  if(state.tokenLines && state.tokenText===$('editor').value && state.tokenLines[line]){
-   try{return state.tokenLines[line].map((t,i)=>tokenHtml(t,line,i)).join('')}catch(e){}
+   try{return annotateTokens(state.tokenLines[line],line)}catch(e){}
  }
  if(state.tokenizer){
-   try{return state.tokenizer.tokenize(text).map((t,i)=>tokenHtml(t,line,i)).join('')}
+   try{return annotateTokens(state.tokenizer.tokenize(text),line)}
    catch(e){}
  }
  // fallback: longest dictionary matching while the background dictionary loads
  let out='',i=0;
+ const keys=Object.keys(special).sort((a,b)=>b.length-a.length);
  while(i<text.length){
    let hit=null;
-   for(const key of Object.keys(special).sort((a,b)=>b.length-a.length)){if(text.startsWith(key,i)){hit=key;break}}
+   for(const key of keys){if(text.startsWith(key,i)){hit=key;break}}
    if(hit){
      const removed=Object.prototype.hasOwnProperty.call(state.overrides,hit) && state.overrides[hit]==='';
      if(removed){out+=`<span class="token token-removed" data-line="${line}" data-idx="${i}" data-surface="${escape(hit)}" data-reading="${escape(shownReading(special[hit]))}">${escape(hit)}</span>`;}
@@ -921,33 +1057,12 @@ document.querySelectorAll('[data-format]').forEach(b=>b.onclick=()=>{document.qu
 // 词典在 Worker 内异步加载/解析，不阻塞页面主线程；加载完成后再把完整分词结果传回页面。
 function startKuromojiWorker(){
   try{
-    const workerCode = `
-      import { kuromoji } from 'https://code4fukui.github.io/kuromoji-es/kuromoji.js';
-      let tokenizer = null;
-      self.onmessage = async (e) => {
-        const {type,id,lines} = e.data || {};
-        if(type === 'init'){
-          try{
-            tokenizer = await kuromoji.createTokenizer();
-            self.postMessage({type:'ready'});
-          }catch(err){
-            self.postMessage({type:'error',message:String(err && err.stack || err)});
-          }
-          return;
-        }
-        if(type === 'tokenize' && tokenizer){
-          try{
-            const result = lines.map(line => tokenizer.tokenize(line));
-            self.postMessage({type:'tokens',id,result});
-          }catch(err){
-            self.postMessage({type:'tokenizeError',id,message:String(err && err.stack || err)});
-          }
-        }
-      };
-    `;
-    const blob = new Blob([workerCode], {type:'text/javascript'});
-    const w = new Worker(URL.createObjectURL(blob), {type:'module'});
+    // 使用真正的同源 Worker 文件，而不是 Blob Worker。
+    // 移动端 Safari/Chrome 对同源 Worker 的兼容性明显更稳定；Worker 内再加载 Kuromoji。
+    const workerUrl = './kuromoji-worker.js?v=10';
+    const w = new Worker(workerUrl);
     state.tokenizerWorker = w;
+    state.tokenizerStartedAt = Date.now();
     w.onmessage = e => {
       const d = e.data || {};
       if(d.type === 'ready'){
@@ -971,10 +1086,18 @@ function startKuromojiWorker(){
     };
     $('loading').textContent = '正在后台加载日文词典…';
     w.postMessage({type:'init'});
+    setTimeout(()=>{
+      if(!state.tokenizerReady && state.tokenizerWorker===w){
+        $('loading').textContent='内置规则模式 · 页面已就绪';
+        console.warn('日文词典加载超时，已切换到规则模式');
+      }
+    },30000);
   }catch(e){
     $('loading').textContent = '内置规则模式 · 页面已就绪';
+    console.warn('日文词典 Worker 创建失败：',e);
   }
 }
+
 function requestWorkerTokens(){
   if(!state.tokenizerWorker || !state.tokenizerReady)return;
   const text = $('editor').value;
