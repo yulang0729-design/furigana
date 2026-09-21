@@ -769,7 +769,7 @@ $('rubyPlus').onclick=()=>{state.rubySize=clamp(state.rubySize+1,8,18);$('rubySi
 $('rubyMinus').onclick=()=>{state.rubySize=clamp(state.rubySize-1,8,18);$('rubySize').textContent=state.rubySize+'px';renderPreview()}
 $('linePlus').onclick=()=>{state.lineSpace=+(state.lineSpace+.1).toFixed(1);$('lineSpace').textContent=state.lineSpace+'x';renderPreview()}
 $('lineMinus').onclick=()=>{state.lineSpace=+(Math.max(1.2,state.lineSpace-.1)).toFixed(1);$('lineSpace').textContent=state.lineSpace+'x';renderPreview()}
-$('editor').oninput=renderPreview;
+$('editor').oninput=()=>renderPreview(true);
 function setTitleAlign(align){state.titleAlign=align;document.querySelectorAll('.title-align-btn').forEach(b=>b.classList.remove('active'));$(align==='center'?'titleAlignCenter':'titleAlignLeft').classList.add('active');$('docTitle').style.textAlign=align;}
 $('titleAlignLeft').onclick=()=>setTitleAlign('left');
 $('titleAlignCenter').onclick=()=>setTitleAlign('center');
