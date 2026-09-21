@@ -223,6 +223,19 @@ rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none;point
 .image-export-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:650px){.image-export-grid{grid-template-columns:1fr}}
 .token{cursor:pointer}
+
+/* 分页导出预览 */
+.paged-preview-modal{width:min(1120px,96vw);max-height:92vh;overflow:auto}
+.paged-preview-tip{font-size:13px;color:var(--muted);line-height:1.6;background:#fff9eb;border:1.5px dashed #dac7ab;border-radius:12px;padding:10px 12px;margin:0 0 14px}
+.paged-preview-list{display:flex;gap:16px;overflow-x:auto;align-items:flex-start;padding:4px 2px 12px}
+.paged-preview-item{flex:0 0 280px}
+.paged-preview-sheet{width:270px;height:360px;border:2px solid var(--border);border-radius:12px;background:#fff;overflow:hidden;box-shadow:3px 3px 0 #e8d7be;position:relative}
+.paged-preview-sheet-inner{width:1080px;height:1440px;transform:scale(.25);transform-origin:top left}
+.paged-preview-sheet-inner .paged-image-page{box-shadow:none!important}
+.paged-preview-actions{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:9px}
+.paged-preview-actions button{font-size:11px;padding:5px 8px}
+.paged-preview-label{text-align:center;font-weight:800;font-size:13px;margin-top:8px;color:var(--text)}
+.paged-preview-empty{padding:30px;text-align:center;color:var(--muted);font-size:13px}
 </style>
 </head>
 <body>
@@ -450,7 +463,22 @@ rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none;point
     </div>
     <div class="modal-foot">
       <button class="irasuto-btn action" id="cancelImage">取消</button>
+      <button class="irasuto-btn action" id="previewPagedBtn" style="display:none">👀 预览并调整分页</button>
       <button class="irasuto-btn action primary" id="doImageExport">生成高清 PNG</button>
+    </div>
+  </div>
+</div>
+
+<!-- 分页预览与调整弹窗 -->
+<div class="modal-back" id="pagedPreviewModal">
+  <div class="irasuto-card modal paged-preview-modal">
+    <h3>📱 导出前分页预览</h3>
+    <div class="paged-preview-tip">先看看每一页实际怎么排。你可以把相邻页面之间的一行文字前后移动，调整分页位置；确认后再生成 PNG。</div>
+    <div id="pagedPreviewList" class="paged-preview-list"></div>
+    <div class="modal-foot">
+      <button class="irasuto-btn action" id="closePagedPreview">返回</button>
+      <button class="irasuto-btn action" id="autoPagedPreview">↻ 重新自动分页</button>
+      <button class="irasuto-btn action primary" id="confirmPagedPreview">确认并导出</button>
     </div>
   </div>
 </div>
@@ -769,7 +797,7 @@ $('rubyPlus').onclick=()=>{state.rubySize=clamp(state.rubySize+1,8,18);$('rubySi
 $('rubyMinus').onclick=()=>{state.rubySize=clamp(state.rubySize-1,8,18);$('rubySize').textContent=state.rubySize+'px';renderPreview()}
 $('linePlus').onclick=()=>{state.lineSpace=+(state.lineSpace+.1).toFixed(1);$('lineSpace').textContent=state.lineSpace+'x';renderPreview()}
 $('lineMinus').onclick=()=>{state.lineSpace=+(Math.max(1.2,state.lineSpace-.1)).toFixed(1);$('lineSpace').textContent=state.lineSpace+'x';renderPreview()}
-$('editor').oninput=()=>renderPreview(true);
+$('editor').oninput=()=>{invalidateManualPagedPages();renderPreview(true)};
 function setTitleAlign(align){state.titleAlign=align;document.querySelectorAll('.title-align-btn').forEach(b=>b.classList.remove('active'));$(align==='center'?'titleAlignCenter':'titleAlignLeft').classList.add('active');$('docTitle').style.textAlign=align;}
 $('titleAlignLeft').onclick=()=>setTitleAlign('left');
 $('titleAlignCenter').onclick=()=>setTitleAlign('center');
@@ -794,7 +822,7 @@ function refreshImageMini(){
  mini.style.backgroundSize='cover';mini.style.backgroundPosition='center';
  mini.innerHTML=`<span style="font-size:24px;color:#303846">${escape(currentExportTitle())}</span>`;
  $('imageBgColorText').textContent=state.imageBgColor;
- $('doImageExport').textContent=state.imageMode==='paged'?'生成分页图片包':'生成高清 PNG';
+ $('doImageExport').textContent=state.imageMode==='paged'?'生成分页图片包':'生成高清 PNG'; $('previewPagedBtn').style.display=state.imageMode==='paged'?'inline-block':'none';
 }
 function openImageModal(mode='long'){
  state.imageMode=mode;
@@ -805,6 +833,7 @@ function openImageModal(mode='long'){
 }
 $('imageBtn').onclick=()=>openImageModal('long');
 $('pagedImageBtn').onclick=()=>openImageModal('paged');
+$('previewPagedBtn').onclick=()=>openPagedPreview();
 $('cancelImage').onclick=()=>{$('imageModal').classList.remove('show')};
 document.querySelectorAll('[data-image-mode]').forEach(b=>b.onclick=()=>openImageModal(b.dataset.imageMode));
 document.querySelectorAll('[data-image-bg]').forEach(b=>b.onclick=()=>{
@@ -896,12 +925,52 @@ async function buildPagedImagePages(){
  temp.remove();
  return pages;
 }
+function clonePageLinesForPreview(pages){
+  return pages.map(page=>page.map(line=>line.cloneNode(true)));
+}
+function invalidateManualPagedPages(){ state.manualPagedPages=null; }
+function renderPagedPreviewModal(){
+  const list=$('pagedPreviewList'); list.innerHTML='';
+  const pages=state.manualPagedPages||[];
+  if(!pages.length){ list.innerHTML='<div class="paged-preview-empty">暂无分页内容，请重新自动分页。</div>'; return; }
+  pages.forEach((lines,pi)=>{
+    const item=document.createElement('div'); item.className='paged-preview-item';
+    const label=document.createElement('div'); label.className='paged-preview-label'; label.textContent=`第 ${pi+1} 页 / 共 ${pages.length} 页`;
+    const sheet=document.createElement('div'); sheet.className='paged-preview-sheet';
+    const inner=document.createElement('div'); inner.className='paged-preview-sheet-inner';
+    const shell=imagePageShell(pi+1,pages.length); shell.page.style.position='static'; shell.page.style.left='0'; shell.page.style.top='0'; shell.page.style.width='1080px'; shell.page.style.height='1440px'; shell.page.style.margin='0'; shell.page.style.transform='none'; shell.page.style.boxShadow='none';
+    lines.forEach(line=>shell.content.appendChild(line.cloneNode(true)));
+    inner.appendChild(shell.page); sheet.appendChild(inner);
+    const actions=document.createElement('div'); actions.className='paged-preview-actions';
+    if(pi>0){
+      const toPrev=document.createElement('button'); toPrev.className='irasuto-btn'; toPrev.textContent='← 本页第一行移到上一页';
+      toPrev.onclick=()=>{ if(pages[pi].length){pages[pi-1].push(pages[pi].shift()); renderPagedPreviewModal();} };
+      actions.appendChild(toPrev);
+    }
+    if(pi<pages.length-1){
+      const toNext=document.createElement('button'); toNext.className='irasuto-btn'; toNext.textContent='本页最后一行 → 下一页';
+      toNext.onclick=()=>{ if(pages[pi].length){pages[pi+1].unshift(pages[pi].pop()); if(!pages[pi].length){pages.splice(pi,1);} renderPagedPreviewModal();} };
+      actions.appendChild(toNext);
+    }
+    item.appendChild(sheet); item.appendChild(label); item.appendChild(actions); list.appendChild(item);
+  });
+}
+async function openPagedPreview(){
+  if(!state.manualPagedPages){
+    state.manualPagedPages=clonePageLinesForPreview(await buildPagedImagePages());
+  }
+  renderPagedPreviewModal(); $('pagedPreviewModal').classList.add('show');
+}
+$('closePagedPreview').onclick=()=>{$('pagedPreviewModal').classList.remove('show')};
+$('autoPagedPreview').onclick=async()=>{state.manualPagedPages=clonePageLinesForPreview(await buildPagedImagePages());renderPagedPreviewModal()};
+$('confirmPagedPreview').onclick=async()=>{$('pagedPreviewModal').classList.remove('show');await exportPagedImages()};
+
 async function exportPagedImages(){
  if(typeof html2canvas!=='function'){alert('图片导出组件尚未加载，请确认网络连接后重试。');return}
  if(typeof JSZip!=='function'){alert('分页图片打包组件尚未加载，请确认网络连接后重试。');return}
  const btn=$('doImageExport');btn.disabled=true;btn.textContent='分页生成中…';let pages=[];
  try{
-   pages=await buildPagedImagePages();
+   pages=state.manualPagedPages||await buildPagedImagePages();
    const zip=new JSZip();
    for(let i=0;i<pages.length;i++){
      const {page,content}=imagePageShell(i+1,pages.length);
