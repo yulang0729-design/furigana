@@ -87,7 +87,7 @@ textarea.editor{width:100%;height:380px;padding:14px;resize:none;line-height:1.8
 .preview{width:100%;height:380px;padding:16px;overflow:auto;display:flex;flex-direction:column;gap:12px;border:2px solid var(--border);border-radius:14px;background:#fff}
 .line{border-bottom:1.5px dashed #eedbc5;padding-bottom:10px;color:#2f241f;font-weight:700}
 .line:last-child{border-bottom:0}
-ruby{ruby-position:over}
+ruby{ruby-position:overruby-overhang:none;}
 rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none;pointer-events:none}
 .token{cursor:pointer;border-radius:6px;padding:0 2px;transition:.1s}
 .token:hover{background:#ffe3b8}
@@ -496,51 +496,29 @@ function makeRuby(surface,reading,line,idx){
  return `<span class="token" data-line="${line}" data-idx="${idx}" data-surface="${escape(surface)}" data-reading="${escape(shown)}"><ruby>${escape(surface)}<rt>${escape(shown)}</rt></ruby></span>`;
 }
 function mixedRubyHtml(s,r,line,idx){
- s=s||''; r=hira(r||''); let out='',rp=0,part=0,hasRuby=false,failed=false;
- for(let i=0;i<s.length;){
-   const ch=s[i];
-   if(!isKanjiChar(ch)){
-     out+=escape(ch);
-     const hc=hira(ch);
-     if(/[ぁ-ゖ]/.test(hc) && r.slice(rp,rp+hc.length)===hc) rp+=hc.length;
-     i++; continue;
-   }
-   let j=i; while(j<s.length&&isKanjiChar(s[j]))j++;
-   const kanjiRun=s.slice(i,j);
-   let k=j; while(k<s.length&&isKanjiChar(s[k]))k++;
-   const nextKana=k<s.length&&/[ぁ-ゖァ-ヶ]/.test(s[k])?hira(s[k]):'';
-   let segment='';
-   if(nextKana){
-     const pos=r.indexOf(nextKana,rp);
-     if(pos>=rp){segment=r.slice(rp,pos);rp=pos}
-     else{failed=true;segment=''}
-   }else{segment=r.slice(rp);rp=r.length}
+ s=s||''; r=hira(r||'');
+ if(!r || !/[一-龯々]/.test(s)) return escape(s);
 
-   // 只要某个汉字片段无法可靠对齐，就不要留下“半个词没有假名”的结果。
-   // 这种情况常见于特殊词、熟字训、词典读音与表记边界不完全一致的词。
-   if(!segment && kanjiRun){failed=true}
-
-   // 手动修改优先于自动读音。mixed word（如「読み方」）会被拆成多个 ruby，
-   // 因此这里必须按实际显示的汉字片段读取 override，而不能只按完整单词读取。
-   const hasPartOverride=Object.prototype.hasOwnProperty.call(state.overrides,kanjiRun);
-   const partOverride=hasPartOverride ? state.overrides[kanjiRun] : null;
-   if(hasPartOverride && partOverride===''){
-     out+=`<span class=\"token token-removed\" data-line=\"${line}\" data-idx=\"${idx}-${part++}\" data-surface=\"${escape(kanjiRun)}\" data-reading=\"${escape(shownReading(segment))}\">${escape(kanjiRun)}</span>`;
-   }else{
-     const finalReading=hasPartOverride ? partOverride : segment;
-     if(finalReading){out+=makeRuby(kanjiRun,finalReading,line,idx+'-'+(part++));hasRuby=true}
-     else {failed=true;out+=escape(kanjiRun)}
-   }
-   i=j;
- }
- // 如果词典读音与原表记无法逐段对齐，退回“整词注音”。
- // 这样宁可整词显示一次完整读音，也不会出现汉字裸着没有假名。
- if(failed && /[一-龯々]/.test(s) && r){
+ // 含有送り仮名的词（如「始め」「食べる」「読み方」等）不要把读音
+ // 硬拆成「<ruby>始<rt>はじ</rt></ruby>め」。
+ // 这种写法会让较长的 rt 按浏览器 ruby 规则向相邻文字伸出，
+ // 手机端尤其容易出现“じ跑到め上面”的视觉错位。
+ // 对这类词，直接让整词作为一个 ruby 基准，读音居中对应整个词。
+ const hasKana=/[ぁ-ゖァ-ヶ]/.test(s);
+ if(hasKana){
    const fullOverride=Object.prototype.hasOwnProperty.call(state.overrides,s) ? state.overrides[s] : null;
-   if(fullOverride==='') return `<span class="token token-removed" data-line="${line}" data-idx="${idx}" data-surface="${escape(s)}" data-reading="${escape(shownReading(r))}">${escape(s)}</span>`;
+   if(fullOverride===''){
+     return `<span class="token token-removed" data-line="${line}" data-idx="${idx}" data-surface="${escape(s)}" data-reading="${escape(shownReading(r))}">${escape(s)}</span>`;
+   }
    return makeRuby(s,fullOverride || r,line,idx);
  }
- return out;
+
+ // 纯汉字词：按词整体标音，避免把一个词的读音错误拆到相邻汉字上。
+ const fullOverride=Object.prototype.hasOwnProperty.call(state.overrides,s) ? state.overrides[s] : null;
+ if(fullOverride===''){
+   return `<span class="token token-removed" data-line="${line}" data-idx="${idx}" data-surface="${escape(s)}" data-reading="${escape(shownReading(r))}">${escape(s)}</span>`;
+ }
+ return makeRuby(s,fullOverride || r,line,idx);
 }
 function tokenHtml(t,line,idx){
  const s=t.surface_form||'';
