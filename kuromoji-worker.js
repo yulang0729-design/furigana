@@ -1,5 +1,5 @@
-/* yesyes标假名 — same-origin Kuromoji worker */
-importScripts('https://cdn.jsdelivr.net/npm/@faanau/kuromoji@0.2.1/build/kuromoji.js');
+/* yesyes标假名 — same-origin, fully local Kuromoji worker */
+importScripts('./kuromoji/kuromoji.js');
 
 let tokenizer = null;
 
@@ -9,9 +9,8 @@ self.onmessage = function(e){
 
   if(type === 'init'){
     try{
-      kuromoji.builder({
-        dicPath: 'https://cdn.jsdelivr.net/npm/@faanau/kuromoji@0.2.1/dict/'
-      }).build(function(err, t){
+      const dicPath = new URL('./kuromoji/dict/', self.location.href).href;
+      kuromoji.builder({ dicPath }).build(function(err, t){
         if(err){
           self.postMessage({type:'error', message:String(err && (err.stack || err.message) || err)});
           return;
