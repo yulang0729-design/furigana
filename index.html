@@ -1088,8 +1088,8 @@ function startKuromojiWorker(){
     w.postMessage({type:'init'});
     setTimeout(()=>{
       if(!state.tokenizerReady && state.tokenizerWorker===w){
-        $('loading').textContent='内置规则模式 · 页面已就绪';
-        console.warn('日文词典加载超时，已切换到规则模式');
+        $('loading').textContent='词典加载超时，请检查本地词典';
+        console.warn('日文词典加载超时');
       }
     },30000);
   }catch(e){
@@ -1107,6 +1107,120 @@ function requestWorkerTokens(){
   state.tokenText = '';
   state.tokenizerWorker.postMessage({type:'tokenize',id,lines});
 }
+
+// ===== 最终修正版：安全的 Kuromoji token 渲染 =====
+// 不再让单个 token 的渲染异常把整行悄悄降级到内置规则模式。
+function safeTokenHtml(t,line,idx){
+  try{
+    const s=String(t && t.surface_form || '');
+    if(!s) return '';
+    if(!/[一-龯々]/.test(s)) return escape(s);
+
+    const hasOverride=Object.prototype.hasOwnProperty.call(state.overrides,s);
+    const override=hasOverride ? state.overrides[s] : null;
+    const reading=override!==null ? override : (special[s] || (t && t.reading ? hira(t.reading) : ''));
+
+    if(hasOverride && override==='') return escape(s);
+    if(!reading) return escape(s);
+
+    // 送假名词：例如 始め / 食べる / 美しい。
+    // 优先使用已有的稳健 mixedRubyHtml；失败时退回整词 ruby，绝不抛错。
+    try{
+      return mixedRubyHtml(s,reading,line,idx);
+    }catch(err){
+      console.warn('ruby token render fallback:', s, err);
+      return makeRuby(s,reading,line,idx);
+    }
+  }catch(err){
+    console.warn('ruby token skipped:', err);
+    return escape(String(t && t.surface_form || ''));
+  }
+}
+
+function safeAnnotateTokens(tokens,line){
+  const list=Array.isArray(tokens)?tokens:[];
+  if(!list.length)return '';
+  let out='';
+  for(let i=0;i<list.length;i++){
+    const t=list[i]||{};
+    // 只在特殊词/手动修改需要时合并；普通 Kuromoji token 直接使用自己的 reading。
+    let merged=null;
+    const keys=[...new Set([...Object.keys(special),...Object.keys(state.overrides)])]
+      .filter(k=>/[一-龯々]/.test(k))
+      .sort((a,b)=>b.length-a.length);
+    for(const key of keys){
+      if((t.surface_form||'')===key){
+        merged=t;
+        break;
+      }
+      let surface='',j=i;
+      while(j<list.length && surface.length<key.length){
+        surface += String(list[j] && list[j].surface_form || '');
+        if(surface.length>key.length)break;
+        j++;
+      }
+      if(surface!==key || j===i) continue;
+
+      // 确认 token 在原文中真正连续；word_position 缺失时也允许按 token 顺序合并。
+      let contiguous=true;
+      for(let k=i+1;k<j;k++){
+        const prev=list[k-1]||{}, cur=list[k]||{};
+        if(typeof prev.word_position==='number' && typeof cur.word_position==='number'){
+          const expected=prev.word_position+String(prev.surface_form||'').length;
+          if(cur.word_position!==expected){contiguous=false;break;}
+        }
+      }
+      if(!contiguous) continue;
+
+      merged={...(list[i]||{}),surface_form:key,reading:
+        Object.prototype.hasOwnProperty.call(state.overrides,key)
+          ? state.overrides[key]
+          : (special[key] || list.slice(i,j).map(x=>x.reading?hira(x.reading):'').join(''))
+      };
+      merged._sourceTokens=list.slice(i,j);
+      break;
+    }
+    if(merged){
+      out+=safeTokenHtml(merged,line,i);
+      const keyLen=String(merged.surface_form||'').length;
+      if(keyLen>String(t.surface_form||'').length){
+        let consumed=0;
+        while(i<list.length && consumed<keyLen){
+          consumed+=String(list[i] && list[i].surface_form || '').length;
+          i++;
+        }
+        i--;
+      }else{
+        // 单 token 特殊词
+      }
+    }else{
+      out+=safeTokenHtml(t,line,i);
+    }
+  }
+  return out;
+}
+
+function annotateLine(text,line){
+  if(state.tokenLines && state.tokenText===$('editor').value && Array.isArray(state.tokenLines[line])){
+    return safeAnnotateTokens(state.tokenLines[line],line);
+  }
+  if(state.tokenizer){
+    try{return safeAnnotateTokens(state.tokenizer.tokenize(text),line)}catch(e){
+      console.warn('tokenize render failed:',e);
+    }
+  }
+  // 词典仍在加载时，只显示内置特殊词；词典就绪后不会走这里。
+  let out='',i=0;
+  const keys=Object.keys(special).sort((a,b)=>b.length-a.length);
+  while(i<text.length){
+    let hit=null;
+    for(const key of keys){if(text.startsWith(key,i)){hit=key;break}}
+    if(hit){out+=mixedRubyHtml(hit,special[hit],line,i);i+=hit.length;}
+    else{out+=escape(text[i]);i++;}
+  }
+  return out;
+}
+
 const _renderPreview = renderPreview;
 renderPreview = function(needRetokenize=true){
   _renderPreview();
