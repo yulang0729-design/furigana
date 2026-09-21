@@ -824,18 +824,42 @@ $('imageBgInput').onchange=e=>{const f=e.target.files[0];if(!f)return;if(state.i
 function buildExportClone(kind){
  const box=document.createElement('div');
  const width=kind==='image'?state.imageWidth:794;
- box.style.cssText=`position:fixed;left:-100000px;top:0;width:${width}px;height:auto;padding:${kind==='image'?70:56}px ${kind==='image'?80:58}px;background:${kind==='image'?(state.imageBgMode==='color'?state.imageBgColor:'#fff'):'#fff'};display:flex;flex-direction:column;gap:${kind==='image'?34:22}px;overflow:visible;box-sizing:border-box;color:#303846;font-family:"Noto Sans JP","Yu Gothic",Meiryo,Arial,sans-serif;`;
+ box.style.cssText=`position:fixed;left:-100000px;top:0;width:${width}px;height:auto;padding:${kind==='image'?70:56}px ${kind==='image'?80:58}px;background:${kind==='image'?(state.imageBgMode==='color'?state.imageBgColor:'#fff'):'#fff'};display:flex;flex-direction:column;gap:${kind==='image'?34:22}px;overflow:visible;box-sizing:border-box;color:#303846;font-family:"M PLUS Rounded 1c","Noto Sans JP","Yu Gothic",Meiryo,Arial,sans-serif;text-rendering:geometricPrecision;font-feature-settings:"palt" 0;`;
  if(kind==='image'&&state.imageBgMode==='image'&&state.imageBgUrl){box.style.backgroundImage=`url("${state.imageBgUrl}")`;box.style.backgroundSize='cover';box.style.backgroundPosition='center'}
  const title=document.createElement('div');title.textContent=currentExportTitle();title.style.cssText=`font-size:${kind==='image'?52:28}px;font-weight:800;color:#303846;margin:0 0 8px;line-height:1.3;text-align:${state.titleAlign};`;box.appendChild(title);
  const content=document.createElement('div');content.style.cssText=`display:flex;flex-direction:column;gap:${kind==='image'?34:18}px;`;content.innerHTML=$('preview').innerHTML;
- content.querySelectorAll('.line').forEach(line=>{line.style.fontSize=(kind==='image'?34:21)+'px';line.style.lineHeight=kind==='image'?'1.9':'1.85';line.style.paddingBottom=kind==='image'?'24px':'14px';line.style.marginBottom='0';});
- content.querySelectorAll('ruby rt').forEach(rt=>{rt.style.fontSize=(kind==='image'?20:12)+'px';rt.style.fontWeight='700';rt.style.color=state.rubyColor;});
+ content.querySelectorAll('.line').forEach(line=>{line.style.fontSize=(kind==='image'?34:21)+'px';line.style.lineHeight=kind==='image'?'1.9':'1.85';line.style.paddingBottom=kind==='image'?'24px':'14px';line.style.marginBottom='0';line.style.wordBreak='normal';line.style.overflowWrap='normal';line.style.letterSpacing='0';});
+ // 导出图片时不要直接依赖浏览器原生 ruby 的排版。html2canvas 对 ruby/标点的基线处理容易出现“？」/」贴住前一个字”的情况。
+ // 改成稳定的 inline-block + 绝对定位 rt，并保留原文字的自然宽度。
+ content.querySelectorAll('ruby').forEach(ruby=>{
+   const base=document.createElement('span');
+   base.className='export-ruby-base';
+   while(ruby.firstChild){
+     const n=ruby.firstChild;
+     if(n.nodeType===1 && n.tagName.toLowerCase()==='rt') break;
+     base.appendChild(n);
+   }
+   const rt=ruby.querySelector('rt');
+   const wrap=document.createElement('span');
+   wrap.className='export-ruby';
+   wrap.style.cssText=`display:inline-block;position:relative;vertical-align:baseline;white-space:nowrap;padding-top:${kind==='image'?22:14}px;line-height:1;`;
+   base.style.cssText='display:inline-block;white-space:nowrap;line-height:1;';
+   wrap.appendChild(base);
+   if(rt){
+     const r=document.createElement('span');
+     r.className='export-ruby-text';
+     r.textContent=rt.textContent;
+     r.style.cssText=`position:absolute;left:50%;top:0;transform:translateX(-50%);white-space:nowrap;font-size:${kind==='image'?20:12}px;font-weight:700;line-height:1;color:${state.rubyColor};pointer-events:none;`;
+     wrap.appendChild(r);
+   }
+   ruby.replaceWith(wrap);
+ });
  box.appendChild(content);document.body.appendChild(box);return box;
 }
 async function exportLongImage(){
  if(typeof html2canvas!=='function'){alert('图片导出组件尚未加载，请确认网络连接后重试。');return}
  const btn=$('doImageExport');btn.disabled=true;btn.textContent='生成中…';let clone=null;
- try{clone=buildExportClone('image');await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+ try{clone=buildExportClone('image');if(document.fonts&&document.fonts.ready)await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
   const canvas=await html2canvas(clone,{scale:2,backgroundColor:null,useCORS:true,allowTaint:false,logging:false,windowWidth:state.imageWidth});
   await new Promise((resolve,reject)=>canvas.toBlob(blob=>{if(blob){download(currentExportTitle()+'.png',blob,'image/png');resolve()}else reject(new Error('PNG 生成失败'))},'image/png'));
   $('imageModal').classList.remove('show');
