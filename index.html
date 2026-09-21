@@ -474,7 +474,8 @@ rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none}
 // yesyes标假名 v10 — PDF修复版
 const state={
   rubyType:'hiragana', rubyColor:'#f57676', fontSize:16, rubySize:10, lineSpace:1.8,
-  tokenizer:null, overrides:{}, editing:null, editMode:false, imageBgMode:'color', imageBgColor:'#e0e5ec',
+  tokenizer:null, tokenizerWorker:null, tokenizerReady:false, tokenLines:null, tokenText:'', tokenRequest:0,
+  overrides:{}, editing:null, editMode:false, imageBgMode:'color', imageBgColor:'#e0e5ec',
   imageBgUrl:'', imageWidth:1440, imageMode:'long', format:'docx', queue:[]
 };
 const $=id=>document.getElementById(id);
@@ -540,11 +541,14 @@ function tokenHtml(t,line,idx){
  return mixedRubyHtml(s,r,line,idx);
 }
 function annotateLine(text,line){
+ if(state.tokenLines && state.tokenText===$('editor').value && state.tokenLines[line]){
+   try{return state.tokenLines[line].map((t,i)=>tokenHtml(t,line,i)).join('')}catch(e){}
+ }
  if(state.tokenizer){
    try{return state.tokenizer.tokenize(text).map((t,i)=>tokenHtml(t,line,i)).join('')}
    catch(e){}
  }
- // fallback: longest dictionary matching
+ // fallback: longest dictionary matching while the background dictionary loads
  let out='',i=0;
  while(i<text.length){
    let hit=null;
@@ -920,10 +924,73 @@ $('batchInput').onchange=e=>addQueue([...e.target.files]);$('dropzone').ondragov
 $('processBtn').onclick=async()=>{if(!state.queue.length)return;for(const f of state.queue){const old=$('editor').value;$('editor').value=await f.text();renderPreview();download(f.name.replace(/\.[^.]+$/,'')+'_dubbing.txt',$('editor').value,'text/plain;charset=utf-8');$('editor').value=old;renderPreview()}alert('批量处理完成（HTML 版默认导出 TXT）。')};
 document.querySelectorAll('[data-format]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-format]').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.format=b.dataset.format});
 
-// 初始化：使用内置规则模式。
-// 不再自动加载 Kuromoji 词典，避免 GitHub Pages 上的大型词典解析卡死主线程。
+// 初始化：先用内置规则立即显示页面；日文词典放到 Web Worker 后台加载，避免 GitHub Pages 卡死主线程。
+function startKuromojiWorker(){
+  try{
+    const workerCode = `
+      let tokenizer=null;
+      self.onmessage=async e=>{
+        const {type,id,lines}=e.data||{};
+        if(type==='init'){
+          try{
+            importScripts('https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js');
+            kuromoji.builder({dicPath:'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/'}).build((err,t)=>{
+              if(err){ self.postMessage({type:'error',message:String(err)}); return; }
+              tokenizer=t; self.postMessage({type:'ready'});
+            });
+          }catch(err){ self.postMessage({type:'error',message:String(err)}); }
+        }
+        if(type==='tokenize' && tokenizer){
+          try{
+            const result=lines.map(line=>tokenizer.tokenize(line));
+            self.postMessage({type:'tokens',id,result});
+          }catch(err){ self.postMessage({type:'tokenizeError',id,message:String(err)}); }
+        }
+      };
+    `;
+    const blob=new Blob([workerCode],{type:'application/javascript'});
+    const w=new Worker(URL.createObjectURL(blob));
+    state.tokenizerWorker=w;
+    w.onmessage=e=>{
+      const d=e.data||{};
+      if(d.type==='ready'){
+        state.tokenizerReady=true;
+        $('loading').textContent='日文词典已就绪 · 自动注音';
+        requestWorkerTokens();
+      }else if(d.type==='tokens' && d.id===state.tokenRequest){
+        state.tokenLines=d.result;
+        state.tokenText=$('editor').value;
+        renderPreview();
+      }else if(d.type==='error'){
+        state.tokenizerReady=false;
+        $('loading').textContent='内置规则模式 · 页面已就绪';
+      }
+    };
+    w.onerror=()=>{state.tokenizerReady=false;$('loading').textContent='内置规则模式 · 页面已就绪'};
+    $('loading').textContent='正在后台加载日文词典…';
+    w.postMessage({type:'init'});
+  }catch(e){ $('loading').textContent='内置规则模式 · 页面已就绪'; }
+}
+function requestWorkerTokens(){
+  if(!state.tokenizerWorker || !state.tokenizerReady)return;
+  const text=$('editor').value;
+  const lines=text.split('\n');
+  const id=++state.tokenRequest;
+  state.tokenLines=null;
+  state.tokenText='';
+  state.tokenizerWorker.postMessage({type:'tokenize',id,lines});
+}
+const _renderPreview=renderPreview;
+renderPreview=function(){
+  _renderPreview();
+  if(state.tokenizerReady){
+    clearTimeout(renderPreview._timer);
+    renderPreview._timer=setTimeout(requestWorkerTokens,120);
+  }
+};
 renderPreview();
-$('loading').textContent='内置规则模式 · 页面已就绪';
+$('loading').textContent='页面已就绪 · 日文词典后台加载中';
+setTimeout(startKuromojiWorker,250);
 </script>
 </body>
 </html>
