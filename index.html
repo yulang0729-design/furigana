@@ -1059,7 +1059,7 @@ function startKuromojiWorker(){
   try{
     // 使用真正的同源 Worker 文件，而不是 Blob Worker。
     // 移动端 Safari/Chrome 对同源 Worker 的兼容性明显更稳定；Worker 内再加载 Kuromoji。
-    const workerUrl = './kuromoji-worker.js?v=10';
+    const workerUrl = './kuromoji-worker.js?v=11';
     const w = new Worker(workerUrl);
     state.tokenizerWorker = w;
     state.tokenizerStartedAt = Date.now();
