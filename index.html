@@ -511,7 +511,17 @@ function mixedRubyHtml(s,r,line,idx){
    let segment='';
    if(nextKana){const pos=r.indexOf(nextKana,rp); if(pos>=rp){segment=r.slice(rp,pos);rp=pos}else{segment=r.slice(rp);rp=r.length}}
    else{segment=r.slice(rp);rp=r.length}
-   out+=makeRuby(kanjiRun,segment,line,idx+'-'+(part++));
+
+   // 手动修改优先于自动读音。mixed word（如「読み方」）会被拆成多个 ruby，
+   // 因此这里必须按实际显示的汉字片段读取 override，而不能只按完整单词读取。
+   const hasPartOverride=Object.prototype.hasOwnProperty.call(state.overrides,kanjiRun);
+   const partOverride=hasPartOverride ? state.overrides[kanjiRun] : null;
+   if(hasPartOverride && partOverride===''){
+     out+=`<span class=\"token token-removed\" data-line=\"${line}\" data-idx=\"${idx}-${part++}\" data-surface=\"${escape(kanjiRun)}\" data-reading=\"${escape(shownReading(segment))}\">${escape(kanjiRun)}</span>`;
+   }else{
+     const finalReading=hasPartOverride ? partOverride : segment;
+     out+=makeRuby(kanjiRun,finalReading,line,idx+'-'+(part++));
+   }
    i=j;
  }
  return out;
@@ -584,7 +594,17 @@ $('rubyEditBtn').onclick=()=>{
  $('preview').querySelectorAll('.token').forEach(el=>el.classList.toggle('edit-target',state.editMode));
 };
 $('cancelRuby').onclick=closeRuby;
-$('saveRuby').onclick=()=>{if(state.editing){const v=$('customRuby').value.trim();state.overrides[state.editing.surface]=v;}closeRuby();renderPreview()}
+$('saveRuby').onclick=()=>{
+ if(state.editing){
+   let v=$('customRuby').value.trim();
+   // 自定义读音统一保存为平假名，之后切换平/片假名时仍能正确转换。
+   // 如果用户输入的是片假名，先转成平假名；空值则表示移除该假名。
+   if(v) v=hira(v);
+   state.overrides[state.editing.surface]=v;
+ }
+ closeRuby();
+ renderPreview();
+}
 $('removeRuby').onclick=()=>{
  if(!state.editing)return;
  const key=state.editing.surface;
