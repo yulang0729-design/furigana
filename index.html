@@ -1059,7 +1059,7 @@ function startKuromojiWorker(){
   try{
     // 使用真正的同源 Worker 文件，而不是 Blob Worker。
     // 移动端 Safari/Chrome 对同源 Worker 的兼容性明显更稳定；Worker 内再加载 Kuromoji。
-    const workerUrl = './kuromoji-worker.js?v=12';
+    const workerUrl = './kuromoji-worker.js?v=13';
     const w = new Worker(workerUrl);
     state.tokenizerWorker = w;
     state.tokenizerStartedAt = Date.now();
@@ -1069,10 +1069,14 @@ function startKuromojiWorker(){
         state.tokenizerReady = true;
         $('loading').textContent = '日文词典已就绪 · 自动注音';
         requestWorkerTokens();
-      }else if(d.type === 'tokens' && d.id === state.tokenRequest){
-        state.tokenLines = d.result;
-        state.tokenText = $('editor').value;
-        renderPreview(false);
+      }else if(d.type === 'tokens'){
+        // 以 Worker 返回的这一批文本为准，不再用 request id 阻断渲染。
+        // 同时使用请求时保存的 tokenText，避免异步返回期间文本变化导致整批结果被丢弃。
+        if(Array.isArray(d.result)){
+          state.tokenLines = d.result;
+          state.tokenText = d.text || state.tokenTextPending || $('editor').value;
+          renderPreview(false);
+        }
       }else if(d.type === 'tokenizeError'){
         console.warn('日文词典分词失败：', d.message);
         $('loading').textContent = '日文词典已加载 · 分词重试中';
@@ -1109,7 +1113,8 @@ function requestWorkerTokens(){
   const id = ++state.tokenRequest;
   state.tokenLines = null;
   state.tokenText = '';
-  state.tokenizerWorker.postMessage({type:'tokenize',id,lines});
+  state.tokenTextPending = text;
+  state.tokenizerWorker.postMessage({type:'tokenize',id,text,lines});
 }
 
 // ===== 稳定版 Kuromoji 渲染：每个含汉字的 token 都直接使用 reading =====
