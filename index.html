@@ -467,6 +467,9 @@ rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none}
 <div id="pdfPrintContainer"></div>
 
 
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script>
 // yesyes标假名 v10 — PDF修复版
 const state={
@@ -897,55 +900,10 @@ $('batchInput').onchange=e=>addQueue([...e.target.files]);$('dropzone').ondragov
 $('processBtn').onclick=async()=>{if(!state.queue.length)return;for(const f of state.queue){const old=$('editor').value;$('editor').value=await f.text();renderPreview();download(f.name.replace(/\.[^.]+$/,'')+'_dubbing.txt',$('editor').value,'text/plain;charset=utf-8');$('editor').value=old;renderPreview()}alert('批量处理完成（HTML 版默认导出 TXT）。')};
 document.querySelectorAll('[data-format]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-format]').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.format=b.dataset.format});
 
-// 初始化：先让页面和所有按钮立即可用。
-// 关键修复：不在这里使用阻塞式 CDN <script src>。外部库全部后台动态加载，
-// 这样 GitHub Pages 即使暂时访问不到 CDN，也不会阻止主程序执行。
+// 初始化：使用内置规则模式。
+// 不再自动加载 Kuromoji 词典，避免 GitHub Pages 上的大型词典解析卡死主线程。
 renderPreview();
-
-function loadExternalScript(src){
-  return new Promise((resolve,reject)=>{
-    const s=document.createElement('script');
-    s.src=src;
-    s.async=true;
-    s.onload=resolve;
-    s.onerror=()=>reject(new Error('加载失败：'+src));
-    document.head.appendChild(s);
-  });
-}
-
-// 图片/PDF/ZIP 组件：后台加载，失败也不影响编辑和注音。
-setTimeout(()=>{
-  Promise.all([
-    loadExternalScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'),
-    loadExternalScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'),
-    loadExternalScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js')
-  ]).catch(e=>console.warn('导出组件加载失败，基础功能仍可用：',e));
-},800);
-
-// Kuromoji 单独后台加载；即使词典失败，也保留内置规则注音和手动修改功能。
-setTimeout(()=>{
-  loadExternalScript('https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js')
-    .then(()=>{
-      if(!window.kuromoji) return;
-      $('loading').textContent='正在加载日文词典…';
-      return new Promise((resolve,reject)=>{
-        try{
-          kuromoji.builder({dicPath:'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/'})
-            .build((err,t)=>err?reject(err):resolve(t));
-        }catch(e){reject(e)}
-      });
-    })
-    .then(t=>{
-      if(!t) return;
-      state.tokenizer=t;
-      $('loading').textContent='词典已就绪';
-      renderPreview();
-    })
-    .catch(e=>{
-      console.warn('Kuromoji 加载失败，继续使用内置规则模式：',e);
-      $('loading').textContent='内置规则模式';
-    });
-},2000);
+$('loading').textContent='内置规则模式 · 页面已就绪';
 </script>
 </body>
 </html>
