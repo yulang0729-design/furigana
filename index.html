@@ -91,7 +91,10 @@ ruby{ruby-position:over}
 rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none}
 .token{cursor:pointer;border-radius:6px;padding:0 2px;transition:.1s}
 .token:hover{background:#ffe3b8}
+.token.edit-target{outline:2px dashed #f0b84b;outline-offset:2px;background:#fff4d6}
 .token-removed{cursor:pointer;border-bottom:2px dotted #e6c89b}
+.ruby-edit-hint{font-size:12px;color:var(--muted);font-weight:700;margin-left:8px}
+.ruby-edit-btn.editing{background:#fbd26a;color:#332924}
 
 .bg-swatch{width:28px;height:28px;border-radius:50%;border:2px solid var(--border);box-shadow:2px 2px 0 rgba(84,67,58,.12);cursor:pointer;padding:0}.bg-swatch.active{outline:3px solid #54433a;outline-offset:2px}
 
@@ -306,8 +309,8 @@ rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none}
 
    <div class="irasuto-card panel">
     <div class="panel-head">
-     <div class="panel-head-left"><span class="panel-title">👀 实时注音预览</span><span class="badge" id="loading">词典准备就绪</span></div>
-     <span class="badge" id="lineCount">4 行</span>
+     <div class="panel-head-left"><span class="panel-title">👀 实时注音预览</span><span class="badge" id="loading">词典准备就绪</span><span class="ruby-edit-hint" id="rubyEditHint">点击假名可直接编辑</span></div>
+     <div class="actions" style="align-items:center"><button class="irasuto-btn action ruby-edit-btn" id="rubyEditBtn" type="button">✏️ 修改假名</button><span class="badge" id="lineCount">4 行</span></div>
     </div>
     <div class="preview" id="preview"></div>
    </div>
@@ -464,28 +467,15 @@ rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none}
 <div id="pdfPrintContainer"></div>
 
 
-<!-- 外部依赖采用异步加载：CDN 慢/失败不会阻塞主页面交互。 -->
-<script>
-(function(){
-  const deps=[
-    ['html2canvas','https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'],
-    ['JSZip','https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'],
-    ['jspdf','https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'],
-    ['kuromoji','https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js']
-  ];
-  window.yesyesDepsReady=Promise.all(deps.map(([name,src])=>new Promise(resolve=>{
-    if(window[name]){resolve(true);return;}
-    const s=document.createElement('script'); s.src=src; s.async=true;
-    s.onload=()=>resolve(true); s.onerror=()=>{console.warn('依赖加载失败：',name);resolve(false)};
-    document.head.appendChild(s);
-  })));
-})();
-</script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
 <script>
 // yesyes标假名 v10 — PDF修复版
 const state={
   rubyType:'hiragana', rubyColor:'#f57676', fontSize:16, rubySize:10, lineSpace:1.8,
-  tokenizer:null, overrides:{}, editing:null, imageBgMode:'color', imageBgColor:'#e0e5ec',
+  tokenizer:null, overrides:{}, editing:null, editMode:false, imageBgMode:'color', imageBgColor:'#e0e5ec',
   imageBgUrl:'', imageWidth:1440, imageMode:'long', format:'docx', queue:[]
 };
 const $=id=>document.getElementById(id);
@@ -566,7 +556,10 @@ function renderPreview(){
  $('exportTitle').textContent=$('docTitle').value||'日语假名文本';
  document.documentElement.style.setProperty('--ruby-color',state.rubyColor);
  $('preview').querySelectorAll('rt').forEach(rt=>{rt.style.fontSize=state.rubySize+'px';rt.style.color=state.rubyColor});
- $('preview').querySelectorAll('.token').forEach(el=>el.onclick=()=>openRuby(el));
+ $('preview').querySelectorAll('.token').forEach(el=>{
+   el.onclick=()=>openRuby(el);
+   el.classList.toggle('edit-target',state.editMode);
+ });
 }
 function openRuby(el){
  state.editing={surface:el.dataset.surface,reading:el.dataset.reading};
@@ -582,6 +575,15 @@ function openRuby(el){
  $('rubyModal').classList.add('show');
 }
 function closeRuby(){$('rubyModal').classList.remove('show');state.editing=null}
+
+// 可见的“修改假名”按钮：开启/关闭编辑提示；点击任意假名即可进入修改弹窗
+$('rubyEditBtn').onclick=()=>{
+ state.editMode=!state.editMode;
+ $('rubyEditBtn').classList.toggle('editing',state.editMode);
+ $('rubyEditBtn').textContent=state.editMode?'✏️ 修改模式已开启':'✏️ 修改假名';
+ $('rubyEditHint').textContent=state.editMode?'请点击需要修改的假名':'点击假名可直接编辑';
+ $('preview').querySelectorAll('.token').forEach(el=>el.classList.toggle('edit-target',state.editMode));
+};
 $('cancelRuby').onclick=closeRuby;
 $('saveRuby').onclick=()=>{if(state.editing){const v=$('customRuby').value.trim();state.overrides[state.editing.surface]=v;}closeRuby();renderPreview()}
 $('removeRuby').onclick=()=>{
@@ -899,21 +901,17 @@ $('batchInput').onchange=e=>addQueue([...e.target.files]);$('dropzone').ondragov
 $('processBtn').onclick=async()=>{if(!state.queue.length)return;for(const f of state.queue){const old=$('editor').value;$('editor').value=await f.text();renderPreview();download(f.name.replace(/\.[^.]+$/,'')+'_dubbing.txt',$('editor').value,'text/plain;charset=utf-8');$('editor').value=old;renderPreview()}alert('批量处理完成（HTML 版默认导出 TXT）。')};
 document.querySelectorAll('[data-format]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-format]').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.format=b.dataset.format});
 
-// 初始化：先让页面自身的交互立即可用，再异步加载 Kuromoji。
-// 这样即使 CDN / 词典加载慢或失败，也不会把整个页面的按钮一起卡死。
+// 初始化：先让页面和所有按钮立即可用，再延迟加载 Kuromoji。
+// 即使 CDN/词典加载失败，也不应阻塞整个工作台。
 renderPreview();
-function initKuromoji(){
-  if(!window.kuromoji){
-    $('loading').textContent='内置规则模式';
-    return;
-  }
-  $('loading').textContent='词典加载中…';
+setTimeout(()=>{
+  if(!window.kuromoji) return;
   try{
+    $('loading').textContent='正在加载日文词典…';
     kuromoji.builder({dicPath:'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/'}).build((err,t)=>{
       if(err){
         console.warn('Kuromoji 加载失败，继续使用内置规则模式：',err);
         $('loading').textContent='内置规则模式';
-        renderPreview();
         return;
       }
       state.tokenizer=t;
@@ -924,13 +922,7 @@ function initKuromoji(){
     console.warn('Kuromoji 初始化失败，继续使用内置规则模式：',e);
     $('loading').textContent='内置规则模式';
   }
-}
-// 外部依赖完全异步；主页面先可操作，词典准备好后再增强注音。
-if(window.yesyesDepsReady){
-  window.yesyesDepsReady.then(()=>initKuromoji());
-}else{
-  initKuromoji();
-}
+},1000);
 </script>
 </body>
 </html>
