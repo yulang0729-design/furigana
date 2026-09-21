@@ -464,10 +464,23 @@ rt{font-size:10px;color:var(--ruby-color);font-weight:800;user-select:none}
 <div id="pdfPrintContainer"></div>
 
 
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
+<!-- 外部依赖采用异步加载：CDN 慢/失败不会阻塞主页面交互。 -->
+<script>
+(function(){
+  const deps=[
+    ['html2canvas','https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'],
+    ['JSZip','https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'],
+    ['jspdf','https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'],
+    ['kuromoji','https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js']
+  ];
+  window.yesyesDepsReady=Promise.all(deps.map(([name,src])=>new Promise(resolve=>{
+    if(window[name]){resolve(true);return;}
+    const s=document.createElement('script'); s.src=src; s.async=true;
+    s.onload=()=>resolve(true); s.onerror=()=>{console.warn('依赖加载失败：',name);resolve(false)};
+    document.head.appendChild(s);
+  })));
+})();
+</script>
 <script>
 // yesyes标假名 v10 — PDF修复版
 const state={
@@ -886,10 +899,37 @@ $('batchInput').onchange=e=>addQueue([...e.target.files]);$('dropzone').ondragov
 $('processBtn').onclick=async()=>{if(!state.queue.length)return;for(const f of state.queue){const old=$('editor').value;$('editor').value=await f.text();renderPreview();download(f.name.replace(/\.[^.]+$/,'')+'_dubbing.txt',$('editor').value,'text/plain;charset=utf-8');$('editor').value=old;renderPreview()}alert('批量处理完成（HTML 版默认导出 TXT）。')};
 document.querySelectorAll('[data-format]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-format]').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.format=b.dataset.format});
 
-// 初始化
+// 初始化：先让页面自身的交互立即可用，再异步加载 Kuromoji。
+// 这样即使 CDN / 词典加载慢或失败，也不会把整个页面的按钮一起卡死。
 renderPreview();
-if(window.kuromoji){
- kuromoji.builder({dicPath:'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/'}).build((err,t)=>{if(err){$('loading').textContent='内置规则模式';renderPreview();return}state.tokenizer=t;$('loading').textContent='词典已就绪';renderPreview()});
+function initKuromoji(){
+  if(!window.kuromoji){
+    $('loading').textContent='内置规则模式';
+    return;
+  }
+  $('loading').textContent='词典加载中…';
+  try{
+    kuromoji.builder({dicPath:'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/'}).build((err,t)=>{
+      if(err){
+        console.warn('Kuromoji 加载失败，继续使用内置规则模式：',err);
+        $('loading').textContent='内置规则模式';
+        renderPreview();
+        return;
+      }
+      state.tokenizer=t;
+      $('loading').textContent='词典已就绪';
+      renderPreview();
+    });
+  }catch(e){
+    console.warn('Kuromoji 初始化失败，继续使用内置规则模式：',e);
+    $('loading').textContent='内置规则模式';
+  }
+}
+// 外部依赖完全异步；主页面先可操作，词典准备好后再增强注音。
+if(window.yesyesDepsReady){
+  window.yesyesDepsReady.then(()=>initKuromoji());
+}else{
+  initKuromoji();
 }
 </script>
 </body>
