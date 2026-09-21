@@ -1059,7 +1059,7 @@ function startKuromojiWorker(){
   try{
     // 使用真正的同源 Worker 文件，而不是 Blob Worker。
     // 移动端 Safari/Chrome 对同源 Worker 的兼容性明显更稳定；Worker 内再加载 Kuromoji。
-    const workerUrl = './kuromoji-worker.js?v=11';
+    const workerUrl = './kuromoji-worker.js?v=12';
     const w = new Worker(workerUrl);
     state.tokenizerWorker = w;
     state.tokenizerStartedAt = Date.now();
@@ -1073,6 +1073,10 @@ function startKuromojiWorker(){
         state.tokenLines = d.result;
         state.tokenText = $('editor').value;
         renderPreview(false);
+      }else if(d.type === 'tokenizeError'){
+        console.warn('日文词典分词失败：', d.message);
+        $('loading').textContent = '日文词典已加载 · 分词重试中';
+        setTimeout(()=>{ if(state.tokenizerReady) requestWorkerTokens(); }, 300);
       }else if(d.type === 'error'){
         state.tokenizerReady = false;
         $('loading').textContent = '内置规则模式 · 页面已就绪';
