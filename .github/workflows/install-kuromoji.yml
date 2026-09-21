@@ -1,0 +1,38 @@
+name: Install local Kuromoji dictionary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install-kuromoji:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Kuromoji package
+        run: |
+          npm pack kuromoji@0.1.2
+          mkdir -p .tmp/kuromoji
+          tar -xzf kuromoji-0.1.2.tgz -C .tmp/kuromoji --strip-components=1
+
+      - name: Copy browser bundle and dictionary
+        run: |
+          rm -rf kuromoji
+          mkdir -p kuromoji/dict
+          cp .tmp/kuromoji/build/kuromoji.js kuromoji/kuromoji.js
+          cp .tmp/kuromoji/dict/*.dat.gz kuromoji/dict/
+          cp /dev/null kuromoji/.gitkeep
+          ls -lh kuromoji/kuromoji.js
+          ls -lh kuromoji/dict
+
+      - name: Commit local Kuromoji
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kuromoji
+          git commit -m "Add local Kuromoji browser dictionary" || echo "No changes to commit"
+          git push
